@@ -1,0 +1,23 @@
+{
+  "name": "zheng-qiangshuai-portfolio",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "api": ".venv\\Scripts\\python.exe api\\market_server.py",
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^6.0.2",
+    "framer-motion": "^12.40.0",
+    "lucide-react": "^1.18.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "vite": "^8.0.16"
+  },
+  "devDependencies": {
+    "webm-writer": "^1.0.0"
+  }
+}
