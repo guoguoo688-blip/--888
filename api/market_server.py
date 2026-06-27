@@ -133,6 +133,37 @@ def yahoo_chart(symbol, label=None, icon=None):
     raise RuntimeError(f"{symbol} quote failed: {last_error}")
 
 
+def eastmoney_quote(item):
+    import requests
+
+    response = requests.get(
+        "https://push2.eastmoney.com/api/qt/stock/get",
+        params={
+            "secid": item["eastmoney"],
+            "fields": "f43,f44,f45,f46,f57,f58,f59,f60,f169,f170",
+        },
+        timeout=8,
+        headers={"User-Agent": "Mozilla/5.0"},
+    )
+    response.raise_for_status()
+    data = response.json().get("data")
+    if not data or data.get("f43") in (None, "-"):
+        raise RuntimeError("Eastmoney empty result")
+
+    scale = 10 ** int(data.get("f59") or 2)
+    return quote_card(
+        item["label"],
+        item.get("symbol", item["eastmoney"]),
+        price=to_number(data.get("f43")) / scale,
+        previous=to_number(data.get("f60")) / scale,
+        open_price=to_number(data.get("f46")) / scale,
+        change=to_number(data.get("f169")) / scale,
+        change_percent=to_number(data.get("f170")) / scale,
+        icon=item.get("icon"),
+        source="Eastmoney",
+    )
+
+
 def sina_quote(item):
     import requests
 
@@ -205,6 +236,22 @@ def sina_quote(item):
             source="Sina Finance",
         )
 
+    if provider == "b":
+        price = to_number(parts[1])
+        change = to_number(parts[2])
+        previous = price - change if price is not None and change is not None else None
+        return quote_card(
+            label,
+            symbol,
+            price=price,
+            previous=previous,
+            open_price=parts[8],
+            change=change,
+            change_percent=parts[3],
+            icon=icon,
+            source="Sina Finance",
+        )
+
     return quote_card(
         label,
         symbol,
@@ -219,6 +266,11 @@ def sina_quote(item):
 
 
 def quote_via_best_source(item):
+    if item.get("eastmoney"):
+        try:
+            return eastmoney_quote(item)
+        except Exception:
+            pass
     if item.get("sina"):
         try:
             return sina_quote(item)
@@ -367,11 +419,11 @@ def fetch_china_sector_cards(limit=18):
 
 
 MAIN_INDICES = [
-    {"label": "上证指数", "sina": "s_sh000001", "provider": "sina-index", "symbol": "000001.SS", "order": 1},
-    {"label": "恒生指数", "sina": "rt_hkHSI", "provider": "hk", "symbol": "^HSI", "order": 2},
-    {"label": "纳斯达克100", "sina": "gb_ndx", "provider": "gb", "symbol": "^NDX", "order": 3},
-    {"label": "标普500", "sina": "int_sp500", "provider": "int", "symbol": "^GSPC", "order": 4},
-    {"label": "道琼斯", "sina": "gb_dji", "provider": "gb", "symbol": "^DJI", "order": 5},
+    {"label": "上证指数", "eastmoney": "1.000001", "sina": "s_sh000001", "provider": "sina-index", "symbol": "000001.SS", "order": 1},
+    {"label": "恒生指数", "eastmoney": "100.HSI", "sina": "rt_hkHSI", "provider": "hk", "symbol": "^HSI", "order": 2},
+    {"label": "纳斯达克综合", "eastmoney": "100.NDX", "sina": "gb_ixic", "provider": "gb", "symbol": "^IXIC", "order": 3},
+    {"label": "标普500", "eastmoney": "100.SPX", "sina": "gb_inx", "provider": "gb", "symbol": "^GSPC", "order": 4},
+    {"label": "道琼斯", "eastmoney": "100.DJIA", "sina": "gb_dji", "provider": "gb", "symbol": "^DJI", "order": 5},
 ]
 
 US_FUTURES = [
@@ -410,28 +462,28 @@ OTHER_INDICATORS = [
     {"label": "布伦特原油", "symbol": "BZ=F", "order": 1},
     {"label": "恐慌指数", "symbol": "^VIX", "order": 2},
     {"label": "美元强弱", "symbol": "DX-Y.NYB", "order": 3},
-    {"label": "美债长债", "symbol": "^TNX", "order": 4},
-    {"label": "黄金盘司", "symbol": "GC=F", "order": 5},
-    {"label": "白银盘司", "symbol": "SI=F", "order": 6},
+    {"label": "美国10年期国债收益率", "symbol": "^TNX", "order": 4},
+    {"label": "黄金盎司", "symbol": "GC=F", "order": 5},
+    {"label": "白银盎司", "symbol": "SI=F", "order": 6},
     {"label": "铜", "symbol": "HG=F", "order": 7},
     {"label": "天然气", "symbol": "NG=F", "order": 8},
 ]
 
 JAPAN_INDEX = [
-    {"label": "日经225", "symbol": "^N225", "order": 1},
-    {"label": "TOPIX ETF", "symbol": "1306.T", "order": 2},
+    {"label": "日经指数", "eastmoney": "100.N225", "symbol": "^N225", "order": 1},
+    {"label": "TOPIX", "sina": "b_TOPIX", "provider": "b", "symbol": "^TOPX", "order": 2},
 ]
 
 JAPAN_SECTORS = [
-    {"label": "半导体设备", "sina": "gb_asml", "provider": "gb", "symbol": "6857.T", "order": 1},
-    {"label": "工业自动化", "sina": "gb_rok", "provider": "gb", "symbol": "6954.T", "order": 2},
-    {"label": "精密制造", "sina": "gb_sony", "provider": "gb", "symbol": "6861.T", "order": 3},
-    {"label": "汽车产业链", "sina": "gb_tm", "provider": "gb", "symbol": "7203.T", "order": 4},
+    {"label": "半导体设备", "symbol": "6857.T", "order": 1},
+    {"label": "工业自动化", "symbol": "6954.T", "order": 2},
+    {"label": "精密制造", "symbol": "6861.T", "order": 3},
+    {"label": "汽车产业链", "symbol": "7203.T", "order": 4},
 ]
 
 KOREA_INDEX = [
-    {"label": "KOSPI", "symbol": "^KS11", "order": 1},
-    {"label": "KOSDAQ", "symbol": "^KQ11", "order": 2},
+    {"label": "韩国综合", "eastmoney": "100.KS11", "sina": "b_KOSPI", "provider": "b", "symbol": "^KS11", "order": 1},
+    {"label": "KOSDAQ", "sina": "b_KOSDAQ", "provider": "b", "symbol": "^KQ11", "order": 2},
 ]
 
 KOREA_SECTORS = [

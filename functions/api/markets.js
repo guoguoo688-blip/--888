@@ -14,11 +14,11 @@ const sinaHeaders = {
 };
 
 const MAIN_INDICES = [
-  { label: "上证指数", sina: "s_sh000001", provider: "sina-index", order: 1 },
-  { label: "恒生指数", sina: "rt_hkHSI", provider: "hk", symbol: "^HSI", order: 2 },
-  { label: "纳斯达克100", sina: "gb_ndx", provider: "gb", symbol: "^NDX", order: 3 },
-  { label: "标普500", sina: "int_sp500", provider: "int", symbol: "^GSPC", order: 4 },
-  { label: "道琼斯", sina: "gb_dji", provider: "gb", symbol: "^DJI", order: 5 },
+  { label: "上证指数", eastmoney: "1.000001", sina: "s_sh000001", provider: "sina-index", order: 1 },
+  { label: "恒生指数", eastmoney: "100.HSI", sina: "rt_hkHSI", provider: "hk", symbol: "^HSI", order: 2 },
+  { label: "纳斯达克综合", eastmoney: "100.NDX", sina: "gb_ixic", provider: "gb", symbol: "^IXIC", order: 3 },
+  { label: "标普500", eastmoney: "100.SPX", sina: "gb_inx", provider: "gb", symbol: "^GSPC", order: 4 },
+  { label: "道琼斯", eastmoney: "100.DJIA", sina: "gb_dji", provider: "gb", symbol: "^DJI", order: 5 },
 ];
 
 const US_FUTURES = [
@@ -54,30 +54,30 @@ const US_SECTORS = [
 ];
 
 const OTHER_INDICATORS = [
-  { label: "布伦特原油", sina: "hf_OIL", provider: "hf", symbol: "BZ=F", order: 1 },
-  { label: "恐慌指数", sina: "gb_vxx", provider: "gb", symbol: "^VIX", order: 2 },
+  { label: "布伦特原油", symbol: "BZ=F", order: 1 },
+  { label: "恐慌指数", symbol: "^VIX", order: 2 },
   { label: "美元强弱", sina: "DINIW", provider: "diniw", symbol: "DX-Y.NYB", order: 3 },
-  { label: "美债长债", sina: "gb_tlt", provider: "gb", symbol: "^TNX", order: 4 },
-  { label: "黄金盘司", sina: "hf_GC", provider: "hf", symbol: "GC=F", order: 5 },
-  { label: "白银盘司", sina: "hf_SI", provider: "hf", symbol: "SI=F", order: 6 },
+  { label: "美国10年期国债收益率", symbol: "^TNX", order: 4 },
+  { label: "黄金盎司", sina: "hf_GC", provider: "hf", symbol: "GC=F", order: 5 },
+  { label: "白银盎司", sina: "hf_SI", provider: "hf", symbol: "SI=F", order: 6 },
   { label: "铜", sina: "hf_HG", provider: "hf", symbol: "HG=F", order: 7 },
   { label: "天然气", sina: "hf_NG", provider: "hf", symbol: "NG=F", order: 8 },
 ];
 
 const JAPAN_INDEX = [
-  { label: "日经225", sina: "int_nikkei", provider: "int", symbol: "^N225", order: 1 },
+  { label: "日经指数", eastmoney: "100.N225", symbol: "^N225", order: 1 },
   { label: "TOPIX", sina: "b_TOPIX", provider: "b", symbol: "1306.T", order: 2 },
 ];
 
 const JAPAN_SECTORS = [
-  { label: "半导体设备", sina: "gb_asml", provider: "gb", symbol: "6857.T", order: 1 },
-  { label: "工业自动化", sina: "gb_rok", provider: "gb", symbol: "6954.T", order: 2 },
-  { label: "精密制造", sina: "gb_sony", provider: "gb", symbol: "6861.T", order: 3 },
-  { label: "汽车产业链", sina: "gb_tm", provider: "gb", symbol: "7203.T", order: 4 },
+  { label: "半导体设备", provider: "yahoo-jp", symbol: "6857.T", order: 1 },
+  { label: "工业自动化", provider: "yahoo-jp", symbol: "6954.T", order: 2 },
+  { label: "精密制造", provider: "yahoo-jp", symbol: "6861.T", order: 3 },
+  { label: "汽车产业链", provider: "yahoo-jp", symbol: "7203.T", order: 4 },
 ];
 
 const KOREA_INDEX = [
-  { label: "KOSPI", sina: "b_KOSPI", provider: "b", symbol: "^KS11", order: 1 },
+  { label: "韩国综合", eastmoney: "100.KS11", sina: "b_KOSPI", provider: "b", symbol: "^KS11", order: 1 },
   { label: "KOSDAQ", sina: "b_KOSDAQ", provider: "b", symbol: "^KQ11", order: 2 },
 ];
 
@@ -191,6 +191,75 @@ async function yahooChart(item) {
   }
 
   throw new Error(`${item.label}暂不可用：${lastError}`);
+}
+
+async function eastmoneyQuote(item) {
+  const fields = "f43,f44,f45,f46,f57,f58,f59,f60,f169,f170";
+  const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${encodeURIComponent(item.eastmoney)}&fields=${fields}`;
+  const response = await fetch(url, { headers: yahooHeaders });
+  if (!response.ok) throw new Error(`Eastmoney ${response.status}`);
+
+  const payload = await response.json();
+  const data = payload?.data;
+  if (!data || data.f43 === null || data.f43 === "-") {
+    throw new Error("Eastmoney empty result");
+  }
+
+  const scale = 10 ** Number(data.f59 ?? 2);
+  return quoteCard({
+    label: item.label,
+    symbol: item.symbol ?? item.eastmoney,
+    price: toNumber(data.f43) / scale,
+    previous: toNumber(data.f60) / scale,
+    open: toNumber(data.f46) / scale,
+    change: toNumber(data.f169) / scale,
+    changePercent: toNumber(data.f170) / scale,
+    icon: item.icon,
+    source: "Eastmoney",
+  });
+}
+
+async function yahooJapanQuote(item) {
+  const url = `https://finance.yahoo.co.jp/quote/${encodeURIComponent(item.symbol)}`;
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0",
+      "Accept-Language": "ja-JP",
+    },
+  });
+  if (!response.ok) throw new Error(`Yahoo Japan ${response.status}`);
+
+  const html = await response.text();
+  const boardStart = html.indexOf('\\"priceBoard\\":');
+  if (boardStart < 0) throw new Error("Yahoo Japan empty result");
+  const board = html.slice(boardStart, boardStart + 4000);
+
+  const readValue = (key) => {
+    const marker = `\\"${key}\\":{\\"value\\":\\"`;
+    const start = board.indexOf(marker);
+    if (start < 0) return null;
+    const valueStart = start + marker.length;
+    const valueEnd = board.indexOf('\\"', valueStart);
+    return valueEnd < 0 ? null : board.slice(valueStart, valueEnd);
+  };
+
+  const price = toNumber(readValue("price"));
+  const change = toNumber(readValue("priceChange"));
+  const changePercent = toNumber(readValue("priceChangeRate"));
+  if (price === null || change === null || changePercent === null) {
+    throw new Error("Yahoo Japan quote fields missing");
+  }
+
+  return quoteCard({
+    label: item.label,
+    symbol: item.symbol,
+    price,
+    previous: price - change,
+    change,
+    changePercent,
+    icon: item.icon,
+    source: "Yahoo Japan",
+  });
 }
 
 async function sinaIndex(item) {
@@ -317,6 +386,20 @@ async function sinaQuote(item) {
 }
 
 async function quoteViaBestSource(item) {
+  if (item.eastmoney) {
+    try {
+      return await eastmoneyQuote(item);
+    } catch {
+      // Continue through the configured fallback sources.
+    }
+  }
+  if (item.provider === "yahoo-jp") {
+    try {
+      return await yahooJapanQuote(item);
+    } catch {
+      return yahooChart(item);
+    }
+  }
   try {
     if (item.provider || item.sina || /^[A-Z.]+$/.test(String(item.symbol ?? ""))) {
       return await sinaQuote(item);

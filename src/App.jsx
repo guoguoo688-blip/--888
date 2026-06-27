@@ -110,6 +110,7 @@ function App() {
 function MarketSection({ section }) {
   const isLarge = ['mainIndices', 'indexFutures'].includes(section.id);
   const isMetric = section.id === 'otherIndicators';
+  const showsPrice = isLarge || isMetric || ['koreaIndex', 'japanIndex'].includes(section.id);
   const cards = section.cards ?? [];
 
   return (
@@ -134,6 +135,7 @@ function MarketSection({ section }) {
               card={card}
               large={isLarge}
               metric={isMetric}
+              showsPrice={showsPrice}
             />
           ))}
         </div>
@@ -144,7 +146,7 @@ function MarketSection({ section }) {
   );
 }
 
-function QuoteCard({ card, large, metric }) {
+function QuoteCard({ card, large, metric, showsPrice }) {
   const move = direction(card.changePercent);
 
   return (
@@ -153,7 +155,7 @@ function QuoteCard({ card, large, metric }) {
         {card.icon ? <span className="quote-icon">{card.icon}</span> : null}
         <div>
           <h3>{card.label}</h3>
-          {large || metric ? <strong>{formatNumber(card.price)}</strong> : null}
+          {showsPrice ? <strong>{formatNumber(card.price)}</strong> : null}
         </div>
       </div>
 

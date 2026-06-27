@@ -9,6 +9,8 @@ dist/
 *.log
 *.local
 .vite/
+__pycache__/
+*.py[cod]
 
 # Editor and OS files
 .vscode/
