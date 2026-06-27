@@ -9,8 +9,8 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-HOST = "127.0.0.1"
-PORT = int(os.environ.get("AKSHARE_DASHBOARD_PORT", "8765"))
+HOST = os.environ.get("HOST", "0.0.0.0")
+PORT = int(os.environ.get("PORT", os.environ.get("AKSHARE_DASHBOARD_PORT", "8765")))
 CACHE_SECONDS = 45
 
 _cache = {"time": 0.0, "payload": None}
