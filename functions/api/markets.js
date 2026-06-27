@@ -14,11 +14,11 @@ const sinaHeaders = {
 };
 
 const MAIN_INDICES = [
-  { label: "上证指数", eastmoney: "1.000001", sina: "s_sh000001", provider: "sina-index", order: 1 },
-  { label: "恒生指数", eastmoney: "100.HSI", sina: "rt_hkHSI", provider: "hk", symbol: "^HSI", order: 2 },
-  { label: "纳斯达克综合", eastmoney: "100.NDX", sina: "gb_ixic", provider: "gb", symbol: "^IXIC", order: 3 },
-  { label: "标普500", eastmoney: "100.SPX", sina: "gb_inx", provider: "gb", symbol: "^GSPC", order: 4 },
-  { label: "道琼斯", eastmoney: "100.DJIA", sina: "gb_dji", provider: "gb", symbol: "^DJI", order: 5 },
+  { label: "上证指数", eastmoney: "1.000001", yahooJp: "000001.SS", sina: "s_sh000001", provider: "sina-index", order: 1 },
+  { label: "恒生指数", eastmoney: "100.HSI", yahooJp: "^HSI", sina: "rt_hkHSI", provider: "hk", symbol: "^HSI", order: 2 },
+  { label: "纳斯达克综合", eastmoney: "100.NDX", yahooJp: "^IXIC", sina: "gb_ixic", provider: "gb", symbol: "^IXIC", order: 3 },
+  { label: "标普500", eastmoney: "100.SPX", yahooJp: "^GSPC", sina: "gb_inx", provider: "gb", symbol: "^GSPC", order: 4 },
+  { label: "道琼斯", eastmoney: "100.DJIA", yahooJp: "^DJI", sina: "gb_dji", provider: "gb", symbol: "^DJI", order: 5 },
 ];
 
 const US_FUTURES = [
@@ -65,7 +65,7 @@ const OTHER_INDICATORS = [
 ];
 
 const JAPAN_INDEX = [
-  { label: "日经指数", eastmoney: "100.N225", symbol: "^N225", order: 1 },
+  { label: "日经指数", eastmoney: "100.N225", yahooJp: "998407.O", symbol: "^N225", order: 1 },
   { label: "TOPIX", sina: "b_TOPIX", provider: "b", symbol: "1306.T", order: 2 },
 ];
 
@@ -77,7 +77,7 @@ const JAPAN_SECTORS = [
 ];
 
 const KOREA_INDEX = [
-  { label: "韩国综合", eastmoney: "100.KS11", sina: "b_KOSPI", provider: "b", symbol: "^KS11", order: 1 },
+  { label: "韩国综合", eastmoney: "100.KS11", yahooJp: "^KS11", sina: "b_KOSPI", provider: "b", symbol: "^KS11", order: 1 },
   { label: "KOSDAQ", sina: "b_KOSDAQ", provider: "b", symbol: "^KQ11", order: 2 },
 ];
 
@@ -219,46 +219,63 @@ async function eastmoneyQuote(item) {
   });
 }
 
-async function yahooJapanQuote(item) {
-  const url = `https://finance.yahoo.co.jp/quote/${encodeURIComponent(item.symbol)}`;
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0",
-      "Accept-Language": "ja-JP",
-    },
-  });
-  if (!response.ok) throw new Error(`Yahoo Japan ${response.status}`);
+let yahooJapanActive = 0;
+const yahooJapanWaiters = [];
 
-  const html = await response.text();
-  const boardStart = html.indexOf('\\"priceBoard\\":');
-  if (boardStart < 0) throw new Error("Yahoo Japan empty result");
-  const board = html.slice(boardStart, boardStart + 4000);
-
-  const readValue = (key) => {
-    const marker = `\\"${key}\\":{\\"value\\":\\"`;
-    const start = board.indexOf(marker);
-    if (start < 0) return null;
-    const valueStart = start + marker.length;
-    const valueEnd = board.indexOf('\\"', valueStart);
-    return valueEnd < 0 ? null : board.slice(valueStart, valueEnd);
-  };
-
-  const price = toNumber(readValue("price"));
-  const change = toNumber(readValue("priceChange"));
-  const changePercent = toNumber(readValue("priceChangeRate"));
-  if (price === null || change === null || changePercent === null) {
-    throw new Error("Yahoo Japan quote fields missing");
+async function withYahooJapanSlot(task) {
+  if (yahooJapanActive >= 2) {
+    await new Promise((resolve) => yahooJapanWaiters.push(resolve));
   }
+  yahooJapanActive += 1;
+  try {
+    return await task();
+  } finally {
+    yahooJapanActive -= 1;
+    yahooJapanWaiters.shift()?.();
+  }
+}
 
-  return quoteCard({
-    label: item.label,
-    symbol: item.symbol,
-    price,
-    previous: price - change,
-    change,
-    changePercent,
-    icon: item.icon,
-    source: "Yahoo Japan",
+async function yahooJapanQuote(item) {
+  return withYahooJapanSlot(async () => {
+    const quoteSymbol = item.yahooJp ?? item.symbol;
+    const url = `https://finance.yahoo.co.jp/quote/${encodeURIComponent(quoteSymbol)}`;
+    let lastError = "";
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await fetch(url, {
+          headers: {
+            "User-Agent": "Mozilla/5.0",
+            "Accept-Language": "ja-JP",
+          },
+        });
+        if (!response.ok) throw new Error(`Yahoo Japan ${response.status}`);
+
+        const html = await response.text();
+        const values = Array.from(
+          html.matchAll(/StyledNumber__value[^>]*>([^<]+)</g),
+          (match) => toNumber(match[1]),
+        ).filter((value) => value !== null);
+
+        if (values.length < 3) throw new Error("Yahoo Japan quote fields missing");
+        const [price, change, changePercent] = values;
+        return quoteCard({
+          label: item.label,
+          symbol: item.symbol ?? quoteSymbol,
+          price,
+          previous: price - change,
+          change,
+          changePercent,
+          icon: item.icon,
+          source: "Yahoo Japan",
+        });
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+        if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
+
+    throw new Error(`${item.label}暂不可用：${lastError}`);
   });
 }
 
@@ -389,6 +406,13 @@ async function quoteViaBestSource(item) {
   if (item.eastmoney) {
     try {
       return await eastmoneyQuote(item);
+    } catch {
+      // Continue through the configured fallback sources.
+    }
+  }
+  if (item.yahooJp) {
+    try {
+      return await yahooJapanQuote(item);
     } catch {
       // Continue through the configured fallback sources.
     }
