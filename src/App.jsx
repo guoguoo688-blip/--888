@@ -101,7 +101,6 @@ function App() {
 
       <footer className="footer">
         <span>数据源：{payload?.source ?? '等待连接'}</span>
-        <span>口径：涨跌幅对比昨收，日内分时对比开盘</span>
         <span>更新时间：{payload?.updatedAt ? new Date(payload.updatedAt).toLocaleString('zh-CN') : '--'}</span>
       </footer>
     </main>
@@ -120,7 +119,7 @@ function MarketSection({ section }) {
         <h2>{section.title}</h2>
       </div>
 
-      {section.message ? (
+      {section.message && !cards.length ? (
         <div className="section-message">
           <AlertCircle size={16} />
           <span>{section.message}</span>

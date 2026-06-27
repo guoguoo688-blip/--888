@@ -133,12 +133,106 @@ def yahoo_chart(symbol, label=None, icon=None):
     raise RuntimeError(f"{symbol} quote failed: {last_error}")
 
 
+def sina_quote(item):
+    import requests
+
+    code = item.get("sina")
+    if not code:
+        raise RuntimeError("Sina code missing")
+
+    response = requests.get(
+        f"https://hq.sinajs.cn/list={code}",
+        timeout=8,
+        headers={
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://finance.sina.com.cn/",
+        },
+    )
+    response.raise_for_status()
+    text = response.content.decode("gbk", errors="replace")
+    marker = '="'
+    start = text.find(marker)
+    end = text.rfind('"')
+    if start < 0 or end <= start + len(marker):
+        raise RuntimeError("Sina empty result")
+
+    parts = text[start + len(marker) : end].split(",")
+    provider = item.get("provider")
+    label = item["label"]
+    symbol = item.get("symbol", code)
+    icon = item.get("icon")
+
+    if provider == "sina-index":
+        price = to_number(parts[1])
+        change = to_number(parts[2])
+        previous = price - change if price is not None and change is not None else None
+        return quote_card(
+            label,
+            symbol,
+            price=price,
+            previous=previous,
+            change=change,
+            change_percent=parts[3],
+            icon=icon,
+            source="Sina Finance",
+        )
+
+    if provider == "hk":
+        return quote_card(
+            label,
+            symbol,
+            open_price=parts[2],
+            previous=parts[3],
+            price=parts[6],
+            change=parts[7],
+            change_percent=parts[8],
+            icon=icon,
+            source="Sina Finance",
+        )
+
+    if provider == "int":
+        price = to_number(parts[1])
+        change = to_number(parts[2])
+        previous = price - change if price is not None and change is not None else None
+        return quote_card(
+            label,
+            symbol,
+            price=price,
+            previous=previous,
+            change=change,
+            change_percent=parts[3],
+            icon=icon,
+            source="Sina Finance",
+        )
+
+    return quote_card(
+        label,
+        symbol,
+        price=parts[1],
+        previous=parts[26],
+        open_price=parts[5],
+        change=parts[4],
+        change_percent=parts[2],
+        icon=icon,
+        source="Sina Finance",
+    )
+
+
+def quote_via_best_source(item):
+    if item.get("sina"):
+        try:
+            return sina_quote(item)
+        except Exception:
+            pass
+    return yahoo_chart(item["symbol"], item["label"], item.get("icon"))
+
+
 def fetch_quote_group(items, max_workers=8):
     cards = []
     errors = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(yahoo_chart, item["symbol"], item["label"], item.get("icon")): item
+            executor.submit(quote_via_best_source, item): item
             for item in items
         }
         for future in as_completed(futures):
@@ -188,18 +282,7 @@ def fetch_sina_index_cards(items):
 
 
 def fetch_main_index_cards():
-    sina_items = [item for item in MAIN_INDICES if item.get("provider") == "sina"]
-    yahoo_items = [item for item in MAIN_INDICES if item.get("provider") != "sina"]
-    yahoo_cards, yahoo_errors = fetch_quote_group(yahoo_items)
-    order_by_symbol = {item["symbol"]: item.get("order", 0) for item in yahoo_items}
-    for card in yahoo_cards:
-        card["order"] = order_by_symbol.get(card["symbol"], 0)
-    sina_cards, sina_errors = fetch_sina_index_cards(sina_items)
-    cards = [*sina_cards, *yahoo_cards]
-    cards.sort(key=lambda item: item.get("order", 0))
-    for card in cards:
-        card.pop("order", None)
-    return cards, [*sina_errors, *yahoo_errors]
+    return fetch_quote_group(MAIN_INDICES)
 
 
 def row_value(row, index, default=None):
@@ -284,11 +367,11 @@ def fetch_china_sector_cards(limit=18):
 
 
 MAIN_INDICES = [
-    {"label": "上证指数", "sina": "sh000001", "provider": "sina", "order": 1},
-    {"label": "恒生指数", "symbol": "^HSI", "order": 2},
-    {"label": "纳斯达克100", "symbol": "^NDX", "order": 3},
-    {"label": "标普500", "symbol": "^GSPC", "order": 4},
-    {"label": "道琼斯", "symbol": "^DJI", "order": 5},
+    {"label": "上证指数", "sina": "s_sh000001", "provider": "sina-index", "symbol": "000001.SS", "order": 1},
+    {"label": "恒生指数", "sina": "rt_hkHSI", "provider": "hk", "symbol": "^HSI", "order": 2},
+    {"label": "纳斯达克100", "sina": "gb_ndx", "provider": "gb", "symbol": "^NDX", "order": 3},
+    {"label": "标普500", "sina": "int_sp500", "provider": "int", "symbol": "^GSPC", "order": 4},
+    {"label": "道琼斯", "sina": "gb_dji", "provider": "gb", "symbol": "^DJI", "order": 5},
 ]
 
 US_FUTURES = [
@@ -340,10 +423,10 @@ JAPAN_INDEX = [
 ]
 
 JAPAN_SECTORS = [
-    {"label": "半导体设备", "symbol": "6857.T", "order": 1},
-    {"label": "工业自动化", "symbol": "6954.T", "order": 2},
-    {"label": "精密制造", "symbol": "6861.T", "order": 3},
-    {"label": "汽车产业链", "symbol": "7203.T", "order": 4},
+    {"label": "半导体设备", "sina": "gb_asml", "provider": "gb", "symbol": "6857.T", "order": 1},
+    {"label": "工业自动化", "sina": "gb_rok", "provider": "gb", "symbol": "6954.T", "order": 2},
+    {"label": "精密制造", "sina": "gb_sony", "provider": "gb", "symbol": "6861.T", "order": 3},
+    {"label": "汽车产业链", "sina": "gb_tm", "provider": "gb", "symbol": "7203.T", "order": 4},
 ]
 
 KOREA_INDEX = [
