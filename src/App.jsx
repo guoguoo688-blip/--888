@@ -3,10 +3,11 @@ import { useEffect, useMemo, useState } from 'react';
 
 const refreshSeconds = 60;
 
-function formatNumber(value) {
+function formatNumber(value, precision = 2) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '--';
   return new Intl.NumberFormat('zh-CN', {
-    maximumFractionDigits: Math.abs(Number(value)) >= 1000 ? 2 : 2,
+    minimumFractionDigits: precision,
+    maximumFractionDigits: precision,
   }).format(Number(value));
 }
 
@@ -16,16 +17,22 @@ function formatPercent(value) {
   return `${sign}${Number(value).toFixed(2)}%`;
 }
 
-function formatChange(value) {
+function formatChange(value, precision = 2) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '--';
   const sign = Number(value) > 0 ? '+' : '';
-  return `${sign}${formatNumber(value)}`;
+  return `${sign}${formatNumber(value, precision)}`;
 }
 
 function direction(value) {
   const number = Number(value);
   if (Number.isNaN(number) || number === 0) return 'flat';
   return number > 0 ? 'up' : 'down';
+}
+
+function formatDataDate(value) {
+  const text = String(value ?? '');
+  if (!/^\d{8}$/.test(text)) return '--';
+  return `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}`;
 }
 
 function App() {
@@ -110,8 +117,23 @@ function App() {
 function MarketSection({ section }) {
   const isLarge = ['mainIndices', 'indexFutures'].includes(section.id);
   const isMetric = section.id === 'otherIndicators';
-  const showsPrice = isLarge || isMetric || ['koreaIndex', 'japanIndex'].includes(section.id);
+  const isChinaSector = section.id === 'chinaSectors';
+  const showsPrice =
+    isLarge ||
+    isMetric ||
+    isChinaSector ||
+    ['koreaIndex', 'japanIndex'].includes(section.id);
   const cards = section.cards ?? [];
+  const sectorGroups = isChinaSector
+    ? Array.from(
+        cards.reduce((groups, card) => {
+          const groupName = card.group || '其他';
+          if (!groups.has(groupName)) groups.set(groupName, []);
+          groups.get(groupName).push(card);
+          return groups;
+        }, new Map()),
+      )
+    : [];
 
   return (
     <section className={`market-section ${section.tone === 'blue' ? 'blue' : 'hot'}`}>
@@ -127,7 +149,28 @@ function MarketSection({ section }) {
         </div>
       ) : null}
 
-      {cards.length ? (
+      {isChinaSector && cards.length ? (
+        <div className="sector-groups">
+          <div className="section-meta">
+            <span>交易日 {formatDataDate(cards[0]?.dataDate)}</span>
+          </div>
+          {sectorGroups.map(([groupName, groupCards]) => (
+            <div className="sector-group" key={groupName}>
+              <h3 className="sector-group-title">{groupName}</h3>
+              <div className="card-grid sector-index-grid">
+                {groupCards.map((card) => (
+                  <QuoteCard
+                    key={`${section.id}-${card.symbol}-${card.label}`}
+                    card={card}
+                    sectorIndex
+                    showsPrice
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : cards.length ? (
         <div className={`card-grid ${isLarge ? 'large' : ''} ${isMetric ? 'metric' : ''}`}>
           {cards.map((card) => (
             <QuoteCard
@@ -146,23 +189,29 @@ function MarketSection({ section }) {
   );
 }
 
-function QuoteCard({ card, large, metric, showsPrice }) {
+function QuoteCard({ card, large, metric, sectorIndex = false, showsPrice }) {
   const move = direction(card.changePercent);
+  const precision = Number.isInteger(card.precision) ? card.precision : 2;
 
   return (
-    <article className={`quote-card ${large ? 'large' : ''} ${metric ? 'metric' : ''}`}>
+    <article
+      className={`quote-card ${large ? 'large' : ''} ${metric ? 'metric' : ''} ${
+        sectorIndex ? 'sector-index' : ''
+      }`}
+    >
       <div className="quote-main">
         {card.icon ? <span className="quote-icon">{card.icon}</span> : null}
         <div>
           <h3>{card.label}</h3>
-          {showsPrice ? <strong>{formatNumber(card.price)}</strong> : null}
+          {sectorIndex ? <small>{card.symbol}</small> : null}
+          {showsPrice ? <strong>{formatNumber(card.price, precision)}</strong> : null}
         </div>
       </div>
 
       <div className={`quote-change ${move}`}>
         <span>{move === 'up' ? '▲' : move === 'down' ? '▼' : '■'}</span>
         <b>{formatPercent(card.changePercent)}</b>
-        {large ? <em>{formatChange(card.change)}</em> : null}
+        {large || sectorIndex ? <em>{formatChange(card.change, precision)}</em> : null}
       </div>
     </article>
   );

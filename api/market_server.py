@@ -374,48 +374,150 @@ def sector_icon(name):
     return "📊"
 
 
-def clean_sector_name(name):
-    name = str(name or "").strip()
-    replacements = {
-        "电子器件": "半导体",
-        "电子信息": "AI算力",
-        "电力行业": "电网",
-        "发电设备": "新能源",
-        "飞机制造": "商业航天",
-        "船舶制造": "军工",
-        "供水供气": "公用事业",
-        "服装鞋类": "消费",
-        "钢铁行业": "钢铁",
-        "电器行业": "电器设备",
-        "传媒娱乐": "传媒",
-        "玻璃行业": "玻璃",
+CHINA_SECTORS = [
+    {"label": "半导体材料", "code": "884091", "group": "科技主线", "order": 1},
+    {"label": "半导体", "code": "881121", "group": "科技主线", "order": 2},
+    {"label": "存储芯片", "code": "886042", "group": "科技主线", "order": 3},
+    {"label": "PCB概念", "code": "885959", "group": "科技主线", "order": 4},
+    {"label": "共封装光学(CPO)", "code": "886033", "group": "科技主线", "order": 5},
+    {"label": "算力租赁", "code": "886050", "group": "科技主线", "order": 6},
+    {"label": "AI应用", "code": "886108", "group": "科技主线", "order": 7},
+    {"label": "机器人概念", "code": "885517", "group": "科技主线", "order": 8},
+    {"label": "商业航天", "code": "886078", "group": "科技主线", "order": 9},
+    {"label": "卫星导航", "code": "885574", "group": "科技主线", "order": 10},
+    {"label": "电网设备", "code": "881278", "group": "产业资源", "order": 11},
+    {"label": "固态电池", "code": "886032", "group": "产业资源", "order": 12},
+    {"label": "光伏概念", "code": "885531", "group": "产业资源", "order": 13},
+    {"label": "核电", "code": "885571", "group": "产业资源", "order": 14},
+    {"label": "有色金属", "code": "1B0819", "group": "产业资源", "order": 15, "kind": "index"},
+    {"label": "创新药", "code": "886015", "group": "医药", "order": 16},
+]
+
+
+def ths_board_line_quote(item):
+    import requests
+
+    year = datetime.now().year
+    rows = []
+    years = [year - 1, year] if datetime.now().month == 1 else [year]
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://q.10jqka.com.cn",
     }
-    return replacements.get(name, name.replace("行业", "").replace("制造", ""))
+    for current_year in years:
+        url = (
+            "https://d.10jqka.com.cn/v4/line/"
+            f"bk_{item['code']}/01/{current_year}.js"
+        )
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        text = response.text
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end <= start:
+            continue
+        payload = json.loads(text[start : end + 1])
+        rows.extend(
+            row.split(",")
+            for row in str(payload.get("data", "")).split(";")
+            if row
+        )
+
+    if len(rows) < 2:
+        raise RuntimeError(f"{item['code']} insufficient history")
+
+    latest = rows[-1]
+    previous = rows[-2]
+    if len(latest) < 7 or len(previous) < 5:
+        raise RuntimeError(f"{item['code']} malformed history")
+
+    card = quote_card(
+        item["label"],
+        item["code"],
+        price=latest[4],
+        previous=previous[4],
+        open_price=latest[1],
+        icon=sector_icon(item["label"]),
+        source="同花顺板块指数",
+    )
+    card["high"] = to_number(latest[2])
+    card["low"] = to_number(latest[3])
+    card["dataDate"] = latest[0]
+    return card
 
 
-def fetch_china_sector_cards(limit=18):
-    try:
-        import akshare as ak
+def ths_market_index_quote(item):
+    import requests
+    from bs4 import BeautifulSoup
 
-        df = ak.stock_sector_spot()
-        rows = []
-        for index, (_, row) in enumerate(df.head(limit).iterrows(), start=1):
-            label = clean_sector_name(row_value(row, 1, ""))
-            rows.append(
-                quote_card(
-                    label,
-                    str(row_value(row, 0, "")),
-                    price=row_value(row, 3),
-                    change=row_value(row, 4),
-                    change_percent=row_value(row, 5),
-                    icon=sector_icon(label),
-                    source="AKShare Sina",
-                )
-            )
-            rows[-1]["rank"] = index
-        return rows, []
-    except Exception:
-        return [], ["A股行业板块暂不可用"]
+    response = requests.get(
+        f"https://q.10jqka.com.cn/zs/detail/code/{item['code']}/",
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=10,
+    )
+    response.raise_for_status()
+    soup = BeautifulSoup(response.content, "lxml", from_encoding="gb18030")
+    board = soup.select_one(".board-hq")
+    if board is None:
+        raise RuntimeError(f"{item['code']} quote missing")
+
+    metrics = {}
+    for metric in soup.select("dl"):
+        name = metric.select_one("dt")
+        value = metric.select_one("dd")
+        if name is not None and value is not None:
+            metrics[name.get_text(strip=True)] = value.get_text(strip=True)
+
+    move_text = board.select_one(".board-zdf")
+    move_values = (move_text.get_text(" ", strip=True).split() if move_text else [])
+    card = quote_card(
+        item["label"],
+        item["code"],
+        price=board.select_one(".board-xj").get_text(strip=True),
+        previous=metrics.get("昨收"),
+        open_price=metrics.get("今开"),
+        change=move_values[0] if move_values else None,
+        change_percent=move_values[1] if len(move_values) > 1 else None,
+        icon=sector_icon(item["label"]),
+        source="同花顺指数",
+    )
+    card["high"] = to_number(metrics.get("最高"))
+    card["low"] = to_number(metrics.get("最低"))
+    card["dataDate"] = None
+    return card
+
+
+def fetch_china_sector_cards():
+    cards = []
+    errors = []
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {
+            executor.submit(
+                ths_market_index_quote
+                if item.get("kind") == "index"
+                else ths_board_line_quote,
+                item,
+            ): item
+            for item in CHINA_SECTORS
+        }
+        for future in as_completed(futures):
+            item = futures[future]
+            try:
+                card = future.result()
+                card["rank"] = item["order"]
+                card["group"] = item["group"]
+                card["precision"] = 3
+                cards.append(card)
+            except Exception:
+                errors.append(f"{item['label']}暂不可用")
+
+    cards.sort(key=lambda card: card["rank"])
+    market_dates = [card["dataDate"] for card in cards if card.get("dataDate")]
+    latest_market_date = max(market_dates) if market_dates else None
+    for card in cards:
+        if not card.get("dataDate"):
+            card["dataDate"] = latest_market_date
+    return cards, errors
 
 
 MAIN_INDICES = [
@@ -570,7 +672,7 @@ def build_payload():
         {
             "updatedAt": now_iso(),
             "status": "ok" if any(section["cards"] for section in sections) else "error",
-            "source": "Yahoo Finance chart + AKShare Sina",
+            "source": "Eastmoney / Yahoo Finance / 同花顺板块指数",
             "message": "；".join(all_errors[:8]),
             "sections": sections,
         }
